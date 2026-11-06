@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#0a0f1a">
+    <meta name="description" content="نظام الإنذار المبكر وإدارة بلاغات الحرائق الريفية في سوريا">
+    <title>درع غابات سوريا - غرفة العمليات</title>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin=""/>
+
+    <style>
+        /* ===== التنسيقات العامة ===== */
+        * {
+            margin: 0; padding: 0; box-sizing: border-box;
+            font-family: 'Segoe UI', 'Tahoma', system-ui, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        body {
+            background: #0a0f1a; overflow: hidden;
+            height: 100vh; height: 100dvh; width: 100vw;
+        }
+        #map { height: 100vh; height: 100dvh; width: 100%; z-index: 1; cursor: crosshair; }
+
+        /* ===== شاشة الترحيب ===== */
+        #splash {
+            position: fixed; inset: 0;
+            background: linear-gradient(145deg, #0b2a1e 0%, #1a3a2a 50%, #0b2a1e 100%);
+            display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
+            z-index: 9999; color: #fff; text-align: center; padding: 20px;
+            transition: opacity 0.8s ease;
+        }
+        #splash.hidden { opacity: 0; pointer-events: none; }
+        .splash-emblem {
+            font-size: 3.5rem; margin-bottom: 12px;
+            filter: drop-shadow(0 0 20px rgba(125, 223, 154, 0.6));
+            animation: floatEmblem 3s ease-in-out infinite;
+        }
+        @keyframes floatEmblem {
+            0%, 100% { transform: translateY(0); }
+            50%      { transform: translateY(-8px); }
+        }
+        #splash h1 {
+            font-size: 2.5rem; font-weight: 700; letter-spacing: 2px;
+            text-shadow: 0 0 30px rgba(0, 255, 100, 0.3); margin-bottom: 8px;
+        }
+        #splash h1 span { color: #7ddf9a; }
+        .splash-tagline {
+            font-size: 1.4rem; opacity: 0.9; margin-top: 4px;
+            letter-spacing: 8px; color: #c9d9cc; font-weight: 500;
+        }
+        .splash-slogan {
+            display: flex; align-items: center; gap: 14px;
+            margin-top: 28px; margin-bottom: 8px;
+            width: 80%; max-width: 420px; justify-content: center;
+        }
+        .slogan-line {
+            flex: 1; height: 1px;
+            background: linear-gradient(to right, transparent, #7ddf9a, transparent);
+            max-width: 60px;
+        }
+        .slogan-text {
+            font-size: 1.25rem; font-weight: 700; color: #a8e6b8;
+            letter-spacing: 1px; white-space: nowrap;
+            text-shadow: 0 0 18px rgba(125, 223, 154, 0.5);
+            animation: sloganGlow 2.5s ease-in-out infinite alternate;
+        }
+        @keyframes sloganGlow {
+            from { text-shadow: 0 0 18px rgba(125, 223, 154, 0.4); }
+            to   { text-shadow: 0 0 28px rgba(125, 223, 154, 0.85); }
+        }
+        #splash .loader {
+            margin-top: 32px; width: 50px; height: 50px;
+            border: 4px solid #2a5a3a; border-top: 4px solid #7ddf9a;
+            border-radius: 50%; animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        #splash .sub {
+            font-size: 0.82rem; margin-top: 28px;
+            border-top: 1px solid #3a6a4a; padding-top: 18px;
+            width: 65%; color: #8fb89a; letter-spacing: 0.5px;
+        }
+
+        /* ===== لوحة التحكم ===== */
+        .control-panel {
+            position: absolute; bottom: 20px; left: 0; width: 100%;
+            display: flex; justify-content: center; align-items: center;
+            gap: 8px; padding: 0 10px; z-index: 999;
+            pointer-events: none; flex-wrap: wrap;
+        }
+        .control-panel button {
+            pointer-events: auto; padding: 8px 14px; border: none;
+            border-radius: 50px; font-size: 0.78rem; font-weight: bold;
+            color: #fff; cursor: pointer;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);
+            transition: transform 0.1s ease, background 0.2s;
+            display: inline-flex; align-items: center; justify-content: center;
+            gap: 4px; height: 42px; background: #2a3a32;
+            touch-action: manipulation; min-width: 44px;
+        }
+        .control-panel button:active { transform: scale(0.94); }
+        .btn-gps { background: #0d7c9e; }
+        .btn-mute { background: #455a64; }
+        .btn-mute.muted { background: #b71c1c; }
+        .btn-clear { background: #c62828; }
+
+        /* ===== حالة الموقع ===== */
+        #locStatus {
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8); padding: 8px 18px;
+            border-radius: 40px; color: #7ddf9a; font-size: 0.82rem;
+            z-index: 999; display: none; border: 1px solid #2a5a3a;
+            backdrop-filter: blur(6px); white-space: nowrap;
+            max-width: 90vw; text-align: center;
+        }
+        #locStatus.error { color: #ff8a80; border-color: #c62828; }
+
+        /* ===== شريط تعليمات ===== */
+        #hintBar {
+            position: absolute; top: 20px; right: 14px;
+            background: rgba(13, 124, 158, 0.92); color: #fff;
+            padding: 8px 14px; border-radius: 40px;
+            font-size: 0.75rem; font-weight: 600; z-index: 998;
+            backdrop-filter: blur(6px); box-shadow: 0 6px 18px rgba(0,0,0,0.5);
+            display: flex; align-items: center; gap: 6px;
+            animation: hintPulse 2s ease-in-out infinite;
+            max-width: 60vw;
+        }
+        @keyframes hintPulse {
+            0%, 100% { opacity: 0.85; }
+            50%      { opacity: 1; transform: scale(1.02); }
+        }
+        #hintBar.dismissed { display: none; }
+
+        /* ===== Toast ===== */
+        #toast {
+            position: absolute; top: 70px; left: 50%;
+            transform: translateX(-50%) translateY(-20px);
+            background: #2e7d32; color: #fff; padding: 10px 22px;
+            border-radius: 40px; font-size: 0.85rem; font-weight: bold;
+            z-index: 10000; opacity: 0; transition: all 0.3s ease;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+            pointer-events: none; max-width: 90vw; text-align: center;
+        }
+        #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+        #toast.error { background: #c62828; }
+        #toast.info { background: #0d7c9e; }
+
+        /* ===== نافذة تفاصيل البلاغ الجديدة المطابقة تماماً للمظهر المطلوب ===== */
+        #reportPopup {
+            position: absolute; bottom: 90px; left: 50%;
+            transform: translateX(-50%);
+            background: rgba(13, 27, 24, 0.96);
+            backdrop-filter: blur(16px);
+            border: 1px solid #204b3a; border-radius: 28px;
+            padding: 20px 24px; width: 92%; max-width: 420px;
+            z-index: 1000; color: #fff;
+            box-shadow: 0 24px 55px rgba(0, 0, 0, 0.8);
+            display: none; max-height: 80vh; overflow-y: auto;
+        }
+        #reportPopup.show { display: block; animation: slideUp 0.25s cubic-bezier(0.1, 0.8, 0.25, 1); }
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateX(-50%) translateY(30px); }
+        }
+
+        /* إصلاح وضوح الخريطة مع السوفت لير ليفلت */
+        .leaflet-container img.leaflet-tile {
+            mix-blend-mode: normal !important;
+            filter: brightness(0.9) contrast(1.15);
+        }
+
+        /* مؤشر حريق تفاعلي ينبض باستمرار */
+        .fire-marker {
+            display: flex !important;
+            align-items: center;
+            justify-content: center;
+        }
+        .fire-marker div {
+            animation: pulseMarker 0.8s infinite alternate ease-in-out;
+            font-size: 26px;
+        }
+        @keyframes pulseMarker {
+            from { transform: scale(1); filter: drop-shadow(0 0 2px #ff3d00); }
+            to { transform: scale(1.35); filter: drop-shadow(0 0 14px #ffea00); }
+        }
+
+        /* أزرار دائرية متناسقة تماماً مع تايتل الصورة المرسلة */
+        .round-action-btn {
+            width: 46px; height: 46px; border-radius: 50%; border: none;
+            color: white; font-weight: bold; cursor: pointer;
+            display: flex; flex-direction: column; align-items: center; 
+            justify-content: center; line-height: 1; text-decoration: none;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+            transition: transform 0.1s;
+        }
+        .round-action-btn:active { transform: scale(0.9); }
+        .round-action-btn span.icon { font-size: 1.15rem; margin-bottom: 2px; }
+        .round-action-btn span.label { font-size: 0.58rem; font-weight: 600; white-space: nowrap; }
+
+        .btn-round-sms { background: #2e7d32; }
+        .btn-round-wa { background: #4CAF50; }
+        .btn-round-link { background: #0288d1; }
+        .btn-round-copy { background: #7b1fa2; }
+        .btn-round-close { background: #424242; font-size: 1.1rem !important; }
+    </style>
+</head>
+<body>
+
+    <div id="splash">
+        <div class="splash-emblem">🛡️</div>
+        <h1>درع غابات <span>سوريا</span></h1>
+        <div class="splash-tagline">غرفة العمليات</div>
+        <div class="splash-slogan">
+            <div class="slogan-line"></div>
+            <div class="slogan-text">حماية واستجابة ذكية</div>
+            <div class="slogan-line"></div>
+        </div>
+        <div class="loader"></div>
+        <div class="sub">نظام الإنذار المبكر وإدارة بلاغات الحرائق الريفية الميدانية</div>
+    </div>
+
+    <div id="map"></div>
+    <div id="locStatus"></div>
+    <div id="toast"></div>
+
+    <div id="hintBar">💡 انقر على أي موقع في الخريطة لتسجيل بلاغ حريق فوري.</div>
+
+    <div id="reportPopup"></div>
+
+    <div class="control-panel">
+        <button class="btn-gps">📍 تحديد موقعي (GPS)</button>
+        <button class="btn-mute">🔊 كتم الصوت</button>
+        <button class="btn-clear">🗑️ مسح البلاغات</button>
+    </div>
+
+    <!-- تضمين مكتبة Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""></script>
+
+    <script>
+        let map;
+        let markersLayer;
+        let userLocationMarker = null;
+        let isMuted = false;
+        let userCoords = null; // تخزين إحداثيات المستخدم الحالية لحساب المسافات الحقيقية
+        
+        // محاكي الصوت التلقائي المدمج
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playSound(type) {
+            if (isMuted) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            
+            if (type === 'alarm') {
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.4);
+                gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.4);
+            } else if (type === 'click') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+                gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+            }
+        }
+
+        // دالة هافرسين لحساب المسافة الجغرافية بدقة فائقة بالكيلومترات
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371; 
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+                      Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return (R * c).toFixed(2);
+        }
+
+        document.addEventListener("DOMContentLoaded", () => {
+            // تهيئة الخريطة متمحورة حول سوريا
+            map = L.map('map', { zoomControl: false }).setView([34.73, 36.72], 8); 
+
+            // دمج خريطة القمر الصناعي عالية التفاصيل لإبراز المعالم الجغرافية السورية بدقة غرف العمليات
+            L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+                attribution: '&copy; Google Maps Satellite Hybrid',
+                maxZoom: 20
+            }).addTo(map);
+
+            markersLayer = L.layerGroup().addTo(map);
+
+            // تلاشي شاشة الترحيب بشكل انسيابي
+            setTimeout(() => {
+                const splash = document.getElementById('splash');
+                if (splash) {
+                    splash.classList.add('hidden');
+                    showToast("غرفة عمليات درع الغابات جاهزة للرصد الميداني", "info");
+                }
+            }, 2500);
+
+            setupMapEvents();
+            setupControlPanel();
+            
+            // محاولة جلب الموقع تلقائياً في الخلفية لحساب المسافات فوراً عند النقر
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(position => {
+                    userCoords = {
+                        lat: position.coords.latitude,
+                        lng: position.coords.longitude
+                    };
+                }, () => {}, { enableHighAccuracy: true });
+            }
+        });
+
+        function showToast(message, type = "success") {
+            const toast = document.getElementById('toast');
+            if (!toast) return;
+            toast.innerText = message;
+            toast.className = `show ${type}`;
+            setTimeout(() => { toast.classList.remove('show'); }, 3500);
+        }
+
+        function setupMapEvents() {
+            map.on('click', (e) => {
+                const { lat, lng } = e.latlng;
+                playSound('alarm');
+                
+                const fireIcon = L.divIcon({
+                    className: 'fire-marker',
+                    html: `<div>🔥</div>`,
+                    iconSize: [30, 30],
+                    iconAnchor: [15, 15]
+                });
+
+                const marker = L.marker([lat, lng], { icon: fireIcon }).addTo(markersLayer);
+                
+                marker.on('click', (markerEvent) => {
+                    L.DomEvent.stopPropagation(markerEvent);
+                    openReportPopup(lat, lng);
+                });
+
+                showToast(`تم رصد إحداثيات بلاغ حريق نشط: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+                openReportPopup(lat, lng);
+            });
+        }
+
+        function openReportPopup(lat, lng) {
+            const popup = document.getElementById('reportPopup');
+            if (!popup) return;
+
+            // تحديد اسم المنطقة تلقائياً بناءً على النطاق التقريبي للإحداثيات
+            let regionName = "يبرود (نطاق ريف دمشق الشمالي)";
+            if (lat > 34.6 && lat < 35.2) {
+                regionName = "مصياف / ريف حماة الغربي";
+            } else if (lat >= 35.2) {
+                regionName = "ريف اللاذقية / طرطوس الحراجي";
+            }
+
+            // حساب المسافة الحقيقية إن توفرت إحداثيات الـ GPS للجهاز الحالي
+            let distanceStr = "غير محدد (يرجى تفعيل الـ GPS)";
+            if (userCoords) {
+                const dist = calculateDistance(userCoords.lat, userCoords.lng, lat, lng);
+                distanceStr = `${dist} كم`;
+            }
+
+            const mapLink = `https://maps.google.com/?q=${lat},${lng}`;
+            const messageText = `🚨 *بلاغ حريق ريفي نشط*\n📍 *الموقع الجغرافي:* ${lat.toFixed(5)}, ${lng.toFixed(5)}\n🏘️ *أقرب منطقة رصد:* ${regionName}\n🗺️ *رابط الملاحة المباشر للخرائط:*\n${mapLink}\n⏱️ *وقت تسجيل التقرير:* ${new Date().toLocaleTimeString('ar-SY')}`;
+
+            const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(messageText)}`;
+            const smsUrl = `sms:?body=${encodeURIComponent(messageText)}`;
+
+            popup.innerHTML = `
+                <h3 style="color: #7ddf9a; margin-bottom: 14px; font-size: 1.15rem; border-bottom: 1px solid #204b3a; padding-bottom: 10px; display: flex; justify-content: center; align-items: center; gap: 6px; font-weight: 700;">
+                    🔥 بلاغ حريق نشط
+                </h3>
+                
+                <div style="font-size: 0.88rem; line-height: 1.9; color: #fff; text-align: right;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px; border-bottom: 1px dashed rgba(255,255,255,0.05); padding-bottom: 3px;">
+                        <span style="color: #8fb89a; font-weight: 600;">الموقع:</span>
+                        <span style="font-family: monospace; letter-spacing: 0.3px; font-weight: bold;">${lat.toFixed(5)}, ${lng.toFixed(5)}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px; border-bottom: 1px dashed rgba(255,255,255,0.05); padding-bottom: 3px;">
+                        <span style="color: #8fb89a; font-weight: 600;">أقرب منطقة:</span>
+                        <span style="font-weight: 500;">${regionName}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px; border-bottom: 1px dashed rgba(255,255,255,0.05); padding-bottom: 3px;">
+                        <span style="color: #8fb89a; font-weight: 600;">المسافة:</span>
+                        <span style="color: #ffb74d; font-weight: bold;">${distanceStr}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px; border-bottom: 1px dashed rgba(255,255,255,0.05); padding-bottom: 3px;">
+                        <span style="color: #8fb89a; font-weight: 600;">الاتجاه:</span>
+                        <span>جنوب شرق</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                        <span style="color: #8fb89a; font-weight: 600;">الرياح:</span>
+                        <span>4 كم/س (E)</span>
+                    </div>
+
+                    <!-- الأزرار الدائرية الذكية المطابقة لشكل الصورة المرفقة تماماً -->
+                    <div style="display: flex; justify-content: center; align-items: center; gap: 12px; margin-top: 20px; padding-top: 14px; border-top: 1px solid #204b3a;">
+                        
+                        <!-- زر إغلاق اللوحة (رمادي غامق) -->
+                        <button onclick="closeReportPopup()" class="round-action-btn btn-round-close" title="إغلاق الواجهة">✕</button>
+                        
+                        <!-- زر نسخ نص التقرير (بنفسجي) -->
+                        <button onclick="navigator.clipboard.writeText(\`${messageText}\`.replace(/\\n/g, '\n')); showToast('تم نسخ نص البلاغ الشامل لحافظة الموبايل');" class="round-action-btn btn-round-copy" title="نسخ تقرير البلاغ الكلي">
+                            <span class="icon">📋</span>
+                            <span class="label">نسخ الرسالة</span>
+                        </button>
+                        
+                        <!-- زر نسخ رابط الخريطة (أزرق) -->
+                        <button onclick="navigator.clipboard.writeText('${mapLink}'); showToast('تم نسخ رابط الإحداثيات الجغرافية');" class="round-action-btn btn-round-link" title="نسخ رابط الموقع فقط">
+                            <span class="icon">🔗</span>
+                            <span class="label">نسخ الرابط</span>
+                        </button>
+                        
+                        <!-- زر إرسال واتساب (أخضر خفيف) -->
+                        <a href="${whatsappUrl}" target="_blank" class="round-action-btn btn-round-wa" title="إرسال التقرير الفوري عبر الواتساب">
+                            <span class="icon">💬</span>
+                            <span class="label">واتساب</span>
+                        </a>
+                        
+                        <!-- زر إرسال رسالة نصية SMS (أخضر داكن) -->
+                        <a href="${smsUrl}" class="round-action-btn btn-round-sms" title="إرسال بلاغ خلوي طارئ SMS">
+                            <span class="icon">✉️</span>
+                            <span class="label">SMS</span>
+                        </a>
+
+                    </div>
+                </div>
+            `;
+            popup.style.display = 'block';
+            setTimeout(() => popup.classList.add('show'), 10);
+        }
+
+        function closeReportPopup() {
+            const popup = document.getElementById('reportPopup');
+            if (popup) {
+                popup.classList.remove('show');
+                setTimeout(() => popup.style.display = 'none', 250);
+            }
+        }
+
+        function setupControlPanel() {
+            const btnGps = document.querySelector('.btn-gps');
+            if (btnGps) {
+                btnGps.addEventListener('click', () => {
+                    playSound('click');
+                    const locStatus = document.getElementById('locStatus');
+                    if (locStatus) {
+                        locStatus.style.display = 'block';
+                        locStatus.innerText = "جاري تتبع إشارات الـ GPS لربط إحداثيات غرفتك الميدانية...";
+                    }
+                    if (!navigator.geolocation) {
+                        showToast("مستشعر الوصول للموقع معطل في هذا الجهاز", "error");
+                        return;
+                    }
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                            const { latitude, longitude, accuracy } = position.coords;
+                            userCoords = { lat: latitude, lng: longitude }; // تحديث الموقع الفعلي
+                            
+                            if (userLocationMarker) map.removeLayer(userLocationMarker);
+                            userLocationMarker = L.circleMarker([latitude, longitude], {
+                                radius: 9, color: '#0d7c9e', fillColor: '#7ddf9a', fillOpacity: 0.9, weight: 3
+                            }).addTo(map);
+                            map.setView([latitude, longitude], 14);
+                            if (locStatus) locStatus.innerText = `تم تأمين اتصال الموقع الجغرافي. حافة الخطأ: ${accuracy.toFixed(0)} متر`;
+                            showToast("تم تحديث نقطة القيادة بنجاح");
+                        },
+                        (error) => {
+                            if (locStatus) locStatus.innerText = "فشل الاتصال بمستشعرات تحديد الموقع الداعمة";
+                            showToast("يرجى إعطاء الصلاحية للمتصفح للوصول إلى الموقع", "error");
+                        },
+                        { enableHighAccuracy: true }
+                    );
+                });
+            }
+
+            const btnMute = document.querySelector('.btn-mute');
+            if (btnMute) {
+                btnMute.addEventListener('click', () => {
+                    isMuted = !isMuted;
+                    btnMute.classList.toggle('muted', isMuted);
+                    btnMute.innerHTML = isMuted ? '🔈 تفعيل الصوت' : '🔊 كتم الصوت';
+                    showToast(isMuted ? "تم كتم الصوت التحذيري" : "الصوت التحذيري قيد التشغيل التلقائي", "info");
+                });
+            }
+
+            const btnClear = document.querySelector('.btn-clear');
+            if (btnClear) {
+                btnClear.addEventListener('click', () => {
+                    playSound('click');
+                    if(confirm("هل تود تنظيف شاشة العمليات ومسح كافة إشارات البلاغات المرصودة؟")) {
+                        markersLayer.clearLayers();
+                        closeReportPopup();
+                        showToast("تم إخلاء كافة نقاط البلاغات من الخريطة", "info");
+                    }
+                });
+            }
+            
+            const hintBar = document.getElementById('hintBar');
+            if (hintBar) {
+                hintBar.addEventListener('click', () => hintBar.classList.add('dismissed'));
+            }
+        }
+    </script>
+</body>
+</html>
